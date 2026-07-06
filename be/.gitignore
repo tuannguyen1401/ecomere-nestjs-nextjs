@@ -1,0 +1,17 @@
+node_modules
+# Keep environment variables out of version control
+.env
+.env*.local
+
+/generated/prisma
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+package.lock.json
+dist
+
+# SQLite database files
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3

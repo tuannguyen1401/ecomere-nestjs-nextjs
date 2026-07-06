@@ -1,0 +1,7 @@
+import { CreateCategoryDto } from './create-category.dto';
+
+export class UpdateCategoryDto implements Partial<CreateCategoryDto> {
+  name?: string;
+  slug?: string;
+  description?: string;
+}
