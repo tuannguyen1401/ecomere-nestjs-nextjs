@@ -6,6 +6,7 @@ import NavbarUserActions from "@/components/NavbarUserActions";
 import CartIcon from "@/components/CartIcon";
 import { AuthProvider } from "@/context/AuthContext";
 import { CartProvider } from "@/context/CartContext";
+import { NotificationProvider } from "@/context/NotificationContext";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -55,6 +56,7 @@ export default function RootLayout({
       </head>
       <body className="min-h-full flex flex-col bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-50 font-sans transition-colors duration-300">
         <AuthProvider>
+        <NotificationProvider>
         <CartProvider>
           {/* Navigation Header */}
           <header className="sticky top-0 z-50 backdrop-blur-md bg-white/80 dark:bg-zinc-950/80 border-b border-zinc-200/80 dark:border-zinc-800/80 transition-colors duration-300">
@@ -105,6 +107,7 @@ export default function RootLayout({
             </div>
           </footer>
         </CartProvider>
+        </NotificationProvider>
         </AuthProvider>
       </body>
     </html>

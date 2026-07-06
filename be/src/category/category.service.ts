@@ -4,33 +4,69 @@ import { CreateCategoryDto } from './dto/create-category.dto';
 import { UpdateCategoryDto } from './dto/update-category.dto';
 import { PaginationQueryDto } from 'src/common/dto/pagination-query.dto';
 import { paginate, PaginatedResult } from 'src/common/utils/prisma-pagination.util';
+import { revalidateFrontendTags } from 'src/common/utils/revalidate.util';
 
 @Injectable()
 export class CategoryService {
   constructor(private prisma: PrismaService) {}
 
   async create(createCategoryDto: CreateCategoryDto) {
-    return this.prisma.category.create({
+    const category = await this.prisma.category.create({
       data: createCategoryDto,
     });
+    revalidateFrontendTags('categories');
+    return category;
   }
 
-  async findAll() {
-    const categories = await this.prisma.category.findMany({
+  async findAll(query?: PaginationQueryDto) {
+    // Xây dựng where clause: search theo name hoặc slug
+    const where: any = {};
+    if (query?.search) {
+      where.OR = [
+        { name: { contains: query.search } },
+        { slug: { contains: query.search } },
+      ];
+    }
+
+    const result = await paginate(this.prisma.category, {
+      query,
+      defaultLimit: 20,
+      orderBy: { id: 'asc' },
+      where,
       include: {
         _count: {
           select: { products: true }
         }
       },
-      orderBy: { id: 'asc' }
     });
 
-    return categories.map(cat => ({
+    // Nếu có phân trang → format response với key "categories"
+    if (!Array.isArray(result)) {
+      const paginated = result as PaginatedResult<any>;
+      return {
+        categories: paginated.items.map((cat: any) => ({
+          id: cat.id,
+          name: cat.name,
+          slug: cat.slug,
+          description: cat.description,
+          productCount: cat._count?.products ?? 0,
+          createdAt: cat.createdAt,
+          updatedAt: cat.updatedAt,
+        })),
+        total: paginated.total,
+        page: paginated.page,
+        limit: paginated.limit,
+        totalPages: paginated.totalPages,
+      };
+    }
+
+    // Không có phân trang → trả về array (backward compatible)
+    return result.map((cat: any) => ({
       id: cat.id,
       name: cat.name,
       slug: cat.slug,
       description: cat.description,
-      productCount: cat._count.products,
+      productCount: cat._count?.products ?? 0,
       createdAt: cat.createdAt,
       updatedAt: cat.updatedAt,
     }));
@@ -92,15 +128,19 @@ export class CategoryService {
   }
 
   async update(id: number, updateCategoryDto: UpdateCategoryDto) {
-    return this.prisma.category.update({
+    const category = await this.prisma.category.update({
       where: { id },
       data: updateCategoryDto,
     });
+    revalidateFrontendTags('categories');
+    return category;
   }
 
   async remove(id: number) {
-    return this.prisma.category.delete({
+    const category = await this.prisma.category.delete({
       where: { id },
     });
+    revalidateFrontendTags('categories');
+    return category;
   }
 }

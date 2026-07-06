@@ -58,7 +58,13 @@ async function getCategories(): Promise<Category[]> {
     });
     if (!res.ok) throw new Error("Failed to fetch categories");
     const result = await res.json();
-    return result.data || [];
+    
+    // Extract categories array from paginated response structure
+    const data = result.data || result;
+    if (data && !Array.isArray(data) && Array.isArray(data.categories)) {
+      return data.categories;
+    }
+    return Array.isArray(data) ? data : [];
   } catch (error) {
     console.error("Error fetching categories:", error);
     return [];

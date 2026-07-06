@@ -4,43 +4,24 @@ import { UpdateProductDto } from './dto/update-product.dto';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { PaginationQueryDto } from 'src/common/dto/pagination-query.dto';
 import { paginate, PaginatedResult } from 'src/common/utils/prisma-pagination.util';
+import { FileService } from 'src/file/file.service';
+import { revalidateFrontendTags } from 'src/common/utils/revalidate.util';
 
 @Injectable()
 export class ProductService {
-  constructor(private prisma: PrismaService) { }
+  constructor(
+    private prisma: PrismaService,
+    private fileService: FileService,
+  ) { }
 
-  private async triggerFrontendRevalidate() {
-    try {
-      const feUrl = process.env.FRONTEND_URL || "http://localhost:3009";
-      
-      // Trigger revalidation for both featured products and categories lists asynchronously
-      // We don't block the request, we just fire and log on failure
-      Promise.all([
-        fetch(`${feUrl}/api/revalidate?tag=featured-products`),
-        fetch(`${feUrl}/api/revalidate?tag=categories`)
-      ]).then((responses) => {
-        responses.forEach((res, index) => {
-          const tag = index === 0 ? 'featured-products' : 'categories';
-          if (!res.ok) {
-            console.warn(`[Revalidate] Failed to revalidate tag: ${tag}, status: ${res.status}`);
-          } else {
-            console.log(`[Revalidate] Successfully revalidated tag: ${tag}`);
-          }
-        });
-      }).catch(err => {
-        console.error('[Revalidate] Error sending revalidation request to frontend:', err);
-      });
-    } catch (error) {
-      console.error('[Revalidate] Unexpected error in triggerFrontendRevalidate:', error);
-    }
-  }
+
 
   async create(createProductDto: CreateProductDto) {
     const product = await this.prisma.product.create({
       data: createProductDto as any,
       include: { category: true }
     });
-    this.triggerFrontendRevalidate();
+    revalidateFrontendTags(['featured-products', 'categories']);
     return product;
   }
 
@@ -52,10 +33,20 @@ export class ProductService {
       orderBy = { [query.sortBy]: direction };
     }
 
+    // Xây dựng where clause: search theo name hoặc slug
+    const where: any = {};
+    if (query?.search) {
+      where.OR = [
+        { name: { contains: query.search } },
+        { slug: { contains: query.search } },
+      ];
+    }
+
     const result = await paginate(this.prisma.product, {
       query,
       defaultLimit: 8,
       orderBy,
+      where,
       include: { category: true },
     });
 
@@ -93,6 +84,14 @@ export class ProductService {
   }
 
   async update(id: number, updateProductDto: UpdateProductDto) {
+    // Nếu có ảnh mới → xoá ảnh cũ (nếu có)
+    if (updateProductDto.image) {
+      const existing = await this.prisma.product.findUnique({ where: { id } });
+      if (existing?.image && existing.image !== updateProductDto.image) {
+        this.fileService.deleteFile(existing.image);
+      }
+    }
+
     const updated = await this.prisma.product.update({
       where: { id },
       data: updateProductDto,
@@ -100,13 +99,19 @@ export class ProductService {
         category: true
       }
     });
-    this.triggerFrontendRevalidate();
+    revalidateFrontendTags(['featured-products', 'categories']);
     return updated;
   }
 
   async remove(id: number) {
+    // Lấy thông tin product trước khi xoá để cleanup ảnh
+    const product = await this.prisma.product.findUnique({ where: { id } });
+    if (product?.image) {
+      this.fileService.deleteFile(product.image);
+    }
+
     const deleted = await this.prisma.product.delete({ where: { id } });
-    this.triggerFrontendRevalidate();
+    revalidateFrontendTags(['featured-products', 'categories']);
     return deleted;
   }
 }

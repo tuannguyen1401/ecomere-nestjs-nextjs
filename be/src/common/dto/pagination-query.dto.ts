@@ -3,6 +3,7 @@ export class PaginationQueryDto {
   limit?: string;
   sortBy?: string;
   sortOrder?: string;
+  search?: string;
 }
 
 export function parsePagination(query?: PaginationQueryDto, defaultLimit = 8) {

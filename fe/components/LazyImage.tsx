@@ -8,6 +8,21 @@ interface LazyImageProps extends React.ImgHTMLAttributes<HTMLImageElement> {
   fallback?: React.ReactNode;
 }
 
+/**
+ * Resolves relative URLs (e.g. from file upload) to absolute backend URLs.
+ * Leaves absolute URLs intact.
+ */
+export const getImageUrl = (src: any): string => {
+  if (typeof src !== "string") return "";
+  if (src.startsWith("http://") || src.startsWith("https://") || src.startsWith("data:")) {
+    return src;
+  }
+  const apiBase = process.env.NEXT_PUBLIC_API || "http://localhost:3010/api";
+  const baseUrl = apiBase.replace(/\/api$/, "");
+  const cleanSrc = src.startsWith("/") ? src : `/${src}`;
+  return `${baseUrl}${cleanSrc}`;
+};
+
 export default function LazyImage({
   src,
   alt,
@@ -29,6 +44,8 @@ export default function LazyImage({
     );
   }
 
+  const resolvedSrc = getImageUrl(src);
+
   return (
     <div className="relative w-full h-full overflow-hidden bg-zinc-100 dark:bg-zinc-900">
       {/* CSS-only background shimmer */}
@@ -36,7 +53,7 @@ export default function LazyImage({
 
       {/* Using standard img element to bypass Next.js Image optimization remote pattern restrictions */}
       <img
-        src={src}
+        src={resolvedSrc}
         alt={alt || "Product Image"}
         loading="lazy"
         className={`relative z-10 transition-opacity duration-300 ${
@@ -48,4 +65,5 @@ export default function LazyImage({
     </div>
   );
 }
+
 

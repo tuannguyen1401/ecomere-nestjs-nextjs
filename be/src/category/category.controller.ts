@@ -19,8 +19,8 @@ export class CategoryController {
   }
 
   @Get()
-  findAll() {
-    return this.categoryService.findAll();
+  findAll(@Query() query: PaginationQueryDto) {
+    return this.categoryService.findAll(query);
   }
 
   @Get(':slug')
