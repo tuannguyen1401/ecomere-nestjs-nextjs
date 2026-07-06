@@ -86,4 +86,24 @@ export class AuthService {
     });
     return users.map(({ password, ...u }) => u);
   }
+
+  async updateUserRole(userId: number, role: string) {
+    if (role !== "admin" && role !== "user") {
+      throw new ConflictException("Invalid role. Must be 'admin' or 'user'");
+    }
+    const user = await this.prisma.user.update({
+      where: { id: userId },
+      data: { role },
+    });
+    const { password, ...result } = user;
+    return result;
+  }
+
+  async deleteUser(userId: number) {
+    const user = await this.prisma.user.delete({
+      where: { id: userId },
+    });
+    const { password, ...result } = user;
+    return result;
+  }
 }
