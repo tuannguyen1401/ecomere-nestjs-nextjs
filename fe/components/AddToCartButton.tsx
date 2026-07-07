@@ -18,15 +18,15 @@ export default function AddToCartButton({ product }: AddToCartButtonProps) {
   const { addToCart } = useCart();
   const [added, setAdded] = useState(false);
 
-  const handleClick = (e: React.MouseEvent) => {
-    e.preventDefault(); // Prevent Link navigation when clicking button
+  const handleClick = async (e: React.MouseEvent) => {
+    e.preventDefault();
     e.stopPropagation();
     if (product.stock <= 0) return;
 
-    const success = addToCart(product, 1);
+    const success = await addToCart(product, 1);
     if (success) {
       setAdded(true);
-      setTimeout(() => setAdded(false), 4000); // Maintain click state and glow for 4 seconds
+      setTimeout(() => setAdded(false), 4000);
     }
   };
 

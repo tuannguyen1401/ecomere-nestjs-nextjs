@@ -7,6 +7,7 @@ import { ProductModule } from './product/product.module';
 import { CategoryModule } from './category/category.module';
 import { AuthModule } from './auth/auth.module';
 import { FileModule } from './file/file.module';
+import { OrderModule } from './order/order.module';
 import * as path from 'path';
 
 @Module({
@@ -26,6 +27,7 @@ import * as path from 'path';
     CategoryModule,
     AuthModule,
     FileModule,
+    OrderModule,
   ],
   controllers: [AppController],
   providers: [AppService],

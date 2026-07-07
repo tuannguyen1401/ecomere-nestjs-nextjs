@@ -14,16 +14,18 @@ datasource db {
 }
 
 model Product {
-  id          Int       @id @default(autoincrement())
-  name        String
-  slug        String    @unique
-  price       Float
-  stock       Int
-  image       String?
-  categoryId  Int?
-  category    Category? @relation(fields: [categoryId], references: [id])
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  id         Int         @id @default(autoincrement())
+  name       String
+  slug       String      @unique
+  price      Float
+  stock      Int
+  image      String?
+  categoryId Int?
+  category   Category?   @relation(fields: [categoryId], references: [id])
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+  orderItems OrderItem[]
+  cartItems  CartItem[]
 }
 
 model Category {
@@ -42,6 +44,62 @@ model User {
   email     String   @unique
   password  String
   role      String   @default("user") // user, admin
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  orders    Order[]
+  cartItems CartItem[]
+}
+
+model CartItem {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  user      User     @relation(fields: [userId], references: [id])
+  productId Int
+  product   Product  @relation(fields: [productId], references: [id])
+  quantity  Int      @default(1)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, productId])
+}
+
+model Order {
+  id              Int                @id @default(autoincrement())
+  orderNumber     String             @unique
+  userId          Int
+  user            User               @relation(fields: [userId], references: [id])
+  total           Float
+  status          String             @default("pending") // pending, confirmed, processing, shipped, delivered, cancelled
+  shippingAddress String?
+  note            String?
+  cancelledAt     DateTime?
+  cancelledReason String?
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+  orderItems      OrderItem[]
+  statusHistory   OrderStatusHistory[]
+}
+
+model OrderStatusHistory {
+  id            Int      @id @default(autoincrement())
+  orderId       Int
+  order         Order    @relation(fields: [orderId], references: [id])
+  fromStatus    String?
+  toStatus      String
+  changedBy     Int
+  changedByRole String   // "admin", "user", "system"
+  note          String?
+  createdAt     DateTime @default(now())
+}
+
+model OrderItem {
+  id        Int      @id @default(autoincrement())
+  orderId   Int
+  order     Order    @relation(fields: [orderId], references: [id])
+  productId Int
+  product   Product  @relation(fields: [productId], references: [id])
+  quantity  Int
+  price     Float
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }

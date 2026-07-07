@@ -1,9 +1,11 @@
 "use client";
 
 import React, { createContext, useContext, useState, useEffect, useCallback } from "react";
+import { useAuth } from "./AuthContext";
+import { apiRequest } from "@/utils/api";
 
 export interface CartItem {
-  id: number;
+  id: number;       // product id
   name: string;
   slug: string;
   price: number;
@@ -20,22 +22,23 @@ export interface ToastMessage {
 
 interface CartContextType {
   items: CartItem[];
-  addToCart: (product: Omit<CartItem, "quantity">, quantity?: number) => boolean;
+  addToCart: (product: Omit<CartItem, "quantity">, quantity?: number) => Promise<boolean>;
   removeFromCart: (productId: number) => void;
-  updateQuantity: (productId: number, quantity: number) => boolean;
+  updateQuantity: (productId: number, quantity: number) => Promise<boolean>;
   clearCart: () => void;
   totalItems: number;
   totalPrice: number;
   toasts: ToastMessage[];
   addToast: (message: string, type?: ToastMessage["type"]) => void;
   removeToast: (id: string) => void;
+  loading: boolean;
 }
 
 const CartContext = createContext<CartContextType | undefined>(undefined);
 
 const CART_STORAGE_KEY = "ag-store-cart";
 
-function loadCart(): CartItem[] {
+function loadLocalCart(): CartItem[] {
   if (typeof window === "undefined") return [];
   try {
     const saved = localStorage.getItem(CART_STORAGE_KEY);
@@ -45,44 +48,109 @@ function loadCart(): CartItem[] {
   }
 }
 
-function saveCart(items: CartItem[]) {
+function saveLocalCart(items: CartItem[]) {
   if (typeof window === "undefined") return;
   localStorage.setItem(CART_STORAGE_KEY, JSON.stringify(items));
 }
 
+// Map server cart item to local CartItem
+function mapServerItem(sci: any): CartItem {
+  return {
+    id: sci.product.id,
+    name: sci.product.name,
+    slug: sci.product.slug,
+    price: sci.product.price,
+    image: sci.product.image,
+    quantity: sci.quantity,
+    stock: sci.product.stock,
+  };
+}
+
 export function CartProvider({ children }: { children: React.ReactNode }) {
+  const { isAuthenticated } = useAuth();
   const [items, setItems] = useState<CartItem[]>([]);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const [hydrated, setHydrated] = useState(false);
+  const [serverItemIds, setServerItemIds] = useState<Map<number, number>>(new Map()); // productId → server cartItemId
+  const [loading, setLoading] = useState(false);
 
-  // Helper to add toast
   const addToast = useCallback((message: string, type: ToastMessage["type"] = "warning") => {
     const id = Math.random().toString(36).substring(2, 9);
     setToasts((prev) => [...prev, { id, message, type }]);
-    setTimeout(() => {
-      setToasts((prev) => prev.filter((t) => t.id !== id));
-    }, 4000);
+    setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), 4000);
   }, []);
 
-  // Helper to remove toast
   const removeToast = useCallback((id: string) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
 
-  // Load cart from localStorage on mount
+  // Initial load
   useEffect(() => {
-    setItems(loadCart());
-    setHydrated(true);
-  }, []);
-
-  // Persist to localStorage whenever items change (after hydration)
-  useEffect(() => {
-    if (hydrated) {
-      saveCart(items);
+    if (isAuthenticated) {
+      // Load from server
+      setLoading(true);
+      apiRequest("/cart")
+        .then((res) => {
+          const data = res.data || res;
+          const cartItems = Array.isArray(data) ? data : [];
+          setItems(cartItems.map(mapServerItem));
+          const idMap = new Map<number, number>();
+          cartItems.forEach((ci: any) => idMap.set(ci.product.id, ci.id));
+          setServerItemIds(idMap);
+        })
+        .catch(() => {
+          // Fallback to local cart
+          setItems(loadLocalCart());
+        })
+        .finally(() => {
+          setHydrated(true);
+          setLoading(false);
+        });
+    } else {
+      // Load from localStorage
+      setItems(loadLocalCart());
+      setHydrated(true);
     }
-  }, [items, hydrated]);
+  }, [isAuthenticated]);
 
-  const addToCart = useCallback((product: Omit<CartItem, "quantity">, quantity: number = 1) => {
+  // Persist to localStorage for anonymous users
+  useEffect(() => {
+    if (hydrated && !isAuthenticated) {
+      saveLocalCart(items);
+    }
+  }, [items, hydrated, isAuthenticated]);
+
+  const addToCart = useCallback(async (product: Omit<CartItem, "quantity">, quantity: number = 1) => {
+    if (isAuthenticated) {
+      try {
+        setLoading(true);
+        const res = await apiRequest("/cart/items", {
+          method: "POST",
+          body: JSON.stringify({ productId: product.id, quantity }),
+        });
+        const data = res.data || res;
+        // Update local state from server response
+        setItems((prev) => {
+          const existing = prev.find((item) => item.id === product.id);
+          if (existing) {
+            return prev.map((item) =>
+              item.id === product.id ? { ...item, quantity: item.quantity + quantity } : item
+            );
+          }
+          return [...prev, mapServerItem(data)];
+        });
+        setServerItemIds((prev) => new Map(prev).set(product.id, data.id));
+        addToast(`Added "${product.name}" to cart!`, "success");
+        return true;
+      } catch {
+        addToast(`Failed to add "${product.name}" to cart.`, "error");
+        return false;
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    // Anonymous user - localStorage
     const existing = items.find((item) => item.id === product.id);
     const currentQty = existing ? existing.quantity : 0;
     const requestedQty = currentQty + quantity;
@@ -90,15 +158,9 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     if (requestedQty > product.stock) {
       const remaining = product.stock - currentQty;
       if (remaining <= 0) {
-        addToast(
-          `Cannot add more! You already have the maximum available stock (${product.stock} items) of "${product.name}" in your cart.`,
-          "warning"
-        );
+        addToast(`You already have the maximum available stock (${product.stock}) of "${product.name}" in your cart.`, "warning");
       } else {
-        addToast(
-          `Only ${product.stock} items available in stock. You already have ${currentQty} in your cart, so you can only add up to ${remaining} more.`,
-          "warning"
-        );
+        addToast(`Only ${remaining} more of "${product.name}" available.`, "warning");
       }
       return false;
     }
@@ -106,95 +168,90 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     setItems((prev) => {
       const exist = prev.find((item) => item.id === product.id);
       if (exist) {
-        return prev.map((item) =>
-          item.id === product.id ? { ...item, quantity: requestedQty } : item
-        );
+        return prev.map((item) => item.id === product.id ? { ...item, quantity: requestedQty } : item);
       }
       return [...prev, { ...product, quantity }];
     });
-    addToast(`Successfully added "${product.name}" to cart!`, "success");
+    addToast(`Added "${product.name}" to cart!`, "success");
     return true;
-  }, [items, addToast]);
+  }, [isAuthenticated, items, addToast]);
 
   const removeFromCart = useCallback((productId: number) => {
     const item = items.find((i) => i.id === productId);
-    setItems((prev) => prev.filter((item) => item.id !== productId));
-    if (item) {
-      addToast(`Removed "${item.name}" from cart.`, "success");
-    }
-  }, [items, addToast]);
+    if (!item) return;
 
-  const updateQuantity = useCallback((productId: number, quantity: number) => {
+    if (isAuthenticated) {
+      const serverId = serverItemIds.get(productId);
+      if (serverId) {
+        apiRequest(`/cart/items/${serverId}`, { method: "DELETE" }).catch(() => {});
+      }
+    }
+
+    setItems((prev) => prev.filter((item) => item.id !== productId));
+    addToast(`Removed "${item.name}" from cart.`, "success");
+  }, [isAuthenticated, items, serverItemIds, addToast]);
+
+  const updateQuantity = useCallback(async (productId: number, quantity: number) => {
     const item = items.find((i) => i.id === productId);
     if (!item) return false;
 
     if (quantity > item.stock) {
-      addToast(
-        `Cannot set quantity to ${quantity}. Only ${item.stock} items are available in stock for "${item.name}".`,
-        "warning"
-      );
+      addToast(`Only ${item.stock} available for "${item.name}".`, "warning");
       return false;
     }
 
     if (quantity <= 0) {
-      setItems((prev) => prev.filter((item) => item.id !== productId));
-      addToast(`Removed "${item.name}" from cart.`, "success");
+      removeFromCart(productId);
       return true;
     }
 
-    setItems((prev) =>
-      prev.map((item) =>
-        item.id === productId ? { ...item, quantity } : item
-      )
-    );
+    if (isAuthenticated) {
+      const serverId = serverItemIds.get(productId);
+      if (serverId) {
+        try {
+          await apiRequest(`/cart/items/${serverId}`, {
+            method: "PATCH",
+            body: JSON.stringify({ quantity }),
+          });
+        } catch {
+          addToast("Failed to update quantity.", "error");
+          return false;
+        }
+      }
+    }
+
+    setItems((prev) => prev.map((item) => item.id === productId ? { ...item, quantity } : item));
     return true;
-  }, [items, addToast]);
+  }, [isAuthenticated, items, serverItemIds, addToast, removeFromCart]);
 
   const clearCart = useCallback(() => {
     setItems([]);
+    if (isAuthenticated) {
+      // Server-side cart is cleared via checkout
+    }
     addToast("Cart cleared.", "success");
-  }, [addToast]);
+  }, [isAuthenticated, addToast]);
 
   const totalItems = items.reduce((sum, item) => sum + item.quantity, 0);
   const totalPrice = items.reduce((sum, item) => sum + item.price * item.quantity, 0);
 
   return (
-    <CartContext.Provider
-      value={{
-        items,
-        addToCart,
-        removeFromCart,
-        updateQuantity,
-        clearCart,
-        totalItems,
-        totalPrice,
-        toasts,
-        addToast,
-        removeToast,
-      }}
-    >
+    <CartContext.Provider value={{
+      items, addToCart, removeFromCart, updateQuantity, clearCart,
+      totalItems, totalPrice, toasts, addToast, removeToast, loading,
+    }}>
       {children}
-
-      {/* Global Toast Container */}
+      {/* Toast Container */}
       <div className="fixed bottom-4 right-4 z-[9999] flex flex-col gap-2 w-full max-w-sm px-4 pointer-events-none">
         <style dangerouslySetInnerHTML={{ __html: `
           @keyframes toast-slide-in {
-            from {
-              transform: translateY(1.5rem);
-              opacity: 0;
-            }
-            to {
-              transform: translateY(0);
-              opacity: 1;
-            }
+            from { transform: translateY(1.5rem); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
           }
-          .animate-toast-slide-in {
-            animation: toast-slide-in 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-          }
+          .animate-toast-slide-in { animation: toast-slide-in 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
         `}} />
         {toasts.map((toast) => (
-          <div
-            key={toast.id}
+          <div key={toast.id}
             className={`pointer-events-auto flex items-start gap-3 p-4 rounded-2xl shadow-lg border backdrop-blur-md transition-all duration-300 transform translate-y-0 animate-toast-slide-in ${
               toast.type === "success"
                 ? "bg-emerald-500/10 dark:bg-emerald-950/20 border-emerald-500/20 dark:border-emerald-800/30 text-emerald-800 dark:text-emerald-300"
@@ -203,7 +260,6 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
                 : "bg-amber-500/10 dark:bg-amber-950/20 border-amber-500/20 dark:border-amber-800/30 text-amber-800 dark:text-amber-300"
             }`}
           >
-            {/* Icon */}
             <span className="flex-shrink-0 mt-0.5">
               {toast.type === "success" && (
                 <svg className="w-5 h-5 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.2}>
@@ -221,17 +277,8 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
                 </svg>
               )}
             </span>
-
-            {/* Message */}
-            <div className="flex-1 text-xs font-semibold leading-relaxed">
-              {toast.message}
-            </div>
-
-            {/* Close Button */}
-            <button
-              onClick={() => removeToast(toast.id)}
-              className="flex-shrink-0 text-zinc-400 hover:text-zinc-650 dark:hover:text-zinc-200 transition-colors cursor-pointer"
-            >
+            <div className="flex-1 text-xs font-semibold leading-relaxed">{toast.message}</div>
+            <button onClick={() => removeToast(toast.id)} className="flex-shrink-0 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 transition-colors cursor-pointer">
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
               </svg>

@@ -24,9 +24,9 @@ export default function ProductDetailAddToCart({ product }: ProductDetailAddToCa
   const decrement = () => setQuantity((q) => Math.max(1, q - 1));
   const increment = () => setQuantity((q) => Math.min(product.stock, q + 1));
 
-  const handleAddToCart = () => {
+  const handleAddToCart = async () => {
     if (!inStock) return;
-    const success = addToCart(product, quantity);
+    const success = await addToCart(product, quantity);
     if (success) {
       setAdded(true);
       setTimeout(() => setAdded(false), 1500);
